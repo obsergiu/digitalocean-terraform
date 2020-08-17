@@ -1,0 +1,86 @@
+#cloud-config
+
+apt:
+  #sources_list: | # written by cloud-init custom template
+  #deb http://ppa.launchpad.net/ondrej/php/ubuntu $RELEASE main
+  #deb-src http://ppa.launchpad.net/ondrej/php/ubuntu $RELEASE main
+
+  sources:
+    #ignored1:
+    #source: "ppa:ondrej/php"
+    php-repo.list:
+      source: "deb http://ppa.launchpad.net/ondrej/php/ubuntu focal main"
+      keyid: "4F4EA0AAE5267A6C"
+      keyserver: "hkp://keyserver.ubuntu.com:80"
+
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+packages:
+  - chkrootkit
+  - rkhunter
+  - fail2ban
+  - nginx
+  - php7.3-fpm
+  - php7.3-cli
+  - php-common
+  - php7.3-json
+  - php7.3-opcache
+  - php7.3-curl
+  - php7.3-soap
+  - php7.3-gd
+  - php7.3-mysql
+  - php7.3-simplexml
+  - certbot
+
+users:
+  - name: ${init_ssh_user}
+    lock_passwd: true
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ${init_ssh_public_key}
+    groups: sudo
+    sudo: ALL=(ALL) NOPASSWD:ALL
+
+write_files:
+  - path: /etc/ssh/sshd_config
+    content: |
+      Port ${init_ssh_port}
+      Protocol 2
+      HostKey /etc/ssh/ssh_host_rsa_key
+      HostKey /etc/ssh/ssh_host_dsa_key
+      HostKey /etc/ssh/ssh_host_ecdsa_key
+      HostKey /etc/ssh/ssh_host_ed25519_key
+      SyslogFacility AUTH
+      LogLevel INFO
+      LoginGraceTime 120
+      PermitRootLogin no
+      StrictModes yes
+      PubkeyAuthentication yes
+      IgnoreRhosts yes
+      HostbasedAuthentication no
+      PermitEmptyPasswords no
+      ChallengeResponseAuthentication no
+      X11Forwarding yes
+      X11DisplayOffset 10
+      PrintMotd no
+      PrintLastLog yes
+      TCPKeepAlive yes
+      AcceptEnv LANG LC_*
+      UsePAM yes
+      AllowUsers ${init_ssh_user}
+
+runcmd:
+  - printf '\n\n=======\n'
+  - echo 'BEGIN RUNCMD'
+  - printf '=======\n\n'
+  # fail2ban
+  - printf "[sshd]\nenabled = true\nbanaction = iptables-multiport" > /etc/fail2ban/jail.local
+  - systemctl enable fail2ban
+  # UFW exceptions
+  - ufw allow from ${init_ssh_ip}
+  - ufw allow ${init_ssh_port}
+  - ufw allow http
+  - ufw allow https
+  - ufw enable

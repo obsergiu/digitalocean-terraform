@@ -1,0 +1,188 @@
+#ndler.handler/# Configuration for Magento 1.9 
+## similar to Magento 2
+## 
+
+root $MAGE_ROOT;
+
+index index.php index.html index.htm;
+
+autoindex off;
+charset UTF-8;
+
+
+## These locations would be hidden by .htaccess normally
+## restrict var, dev and .git directory from external access
+## restrict cron.php from external access
+location ^~ /app/                { deny all; }
+location ^~ /includes/           { deny all; }
+location ^~ /lib/                { deny all; }
+location ^~ /media/downloadable/ { deny all; }
+location ^~ /pkginfo/            { deny all; }
+location ^~ /report/config.xml   { deny all; }
+
+location ^~ /.git/ { return 403; }
+location ^~ /cron.php { return 403; }
+location ^~ /dev/ { return 403; }
+location ^~ /var/ { return 403; }
+
+
+## Extra protection
+location ^~ rss/(order|catalog) { deny all; }
+location ^~ ^/([^/])+\.(sh|pl|py|lua|inc|swp|phar|php_|log|ini|md|sql|conf|yml|zip|tar|.+gz)$ { deny all; }
+location ^~ /\.(svn|git|hg|htpasswd|bash|ssh) { deny all; }
+location ^~ /(dev/tests/|errors/local.xml|cron\.php) { deny all; }
+location ~* /(lib|media|shell|skin)/.*\.php$ { deny all; }
+
+#location ~ ^/(wishlist|customer|catalogsearch|newsletter|tag/product/list|sales/guest/view|contacts/index/post|review/product/(view|list|post)|(fire|one.+)?checkout)/  {
+#        limit_req zone=goeasy burst=5;
+#        limit_req_status 429;
+#        if ($http_user_agent ~* "Baiduspider|AdsBot-Google|Googlebot|bingbot|Yahoo|Yandex") { return 410; }
+#        try_files $uri $uri/ @rewrite;
+#}
+
+set $filters 0;
+## Dont let search bots to drill your website | exclude some args from indexing
+if ($args ~ ^(brand|cat|color|dir|from|limit|price|type|mode|size|manufacturer)=.+) { set $filters A; }
+if ($http_user_agent ~* "Baiduspider|Googlebot|bingbot|Yahoo|Yandex") { set $filters "${filters}B"; }
+if ($filters = AB) { return 410; }
+
+
+###########################
+## Main entry point
+###########################
+location / {
+    ## If missing pass the URI to Magento's front handler
+    try_files /maintenance.html $uri $uri/ @handler;
+    expires 30d; ## Assume all files are cachable
+}
+
+## Magento uses a common front handler
+## for subdirectory store
+## this needs to go in vhost
+#map $request_uri $storedir {
+#    default '';
+#    ~^/nl '/nl';
+#    ~^/de '/de';
+#    ~^/fr  '/fr';
+#}
+#location @handler {
+#    rewrite / $storedir/index.php;
+#}
+
+# Don't skip .thumbs
+location ~ /\.thumbs {
+
+}
+
+## deny htaccess files
+location ~ /\. {
+    deny  all;
+    access_log off;
+    log_not_found off;
+}
+
+##
+# Rewrite for versioned CSS+JS via filemtime
+##
+location ~* ^.+\.(css|js)$ {
+    rewrite ^(.+)\.(\d+)\.(css|js)$ $1.$3 last;
+    expires 31536000s;
+    access_log off;
+    log_not_found off;
+    add_header Pragma public;
+    add_header Cache-Control "max-age=31536000, public";
+}
+
+##
+# Aggressive caching for static files
+# If you alter static files often, please use
+# add_header Cache-Control "max-age=31536000, public, must-revalidate, proxy-revalidate";
+##
+location ~* \.(asf|asx|wax|wmv|wmx|avi|bmp|class|divx|doc|docx|exe|gif|gz|gzip|ico|jpg|jpeg|jpe|mdb|mid|midi|mov|qt|mp3|m4a|mp4|m4v|mpeg|mpg|mpe|mpp|odb|odc|odf|odg|odp|ods|odt|ogg|pdf|png|pot|pps|ppt|pptx|ra|ram|swf|tar|tif|tiff|wav|wma|wri|xla|xls|xlsx|xlt|xlw|zip)$ {
+    expires 31536000s;
+    access_log off;
+    log_not_found off;
+    add_header Pragma public;
+    add_header Cache-Control "max-age=31536000, public";
+}
+
+
+
+## Fonts
+location ~* \.(swf|eot|ttf|otf|woff|woff2)$ {
+    expires max;
+    log_not_found off;
+    access_log off;
+    add_header ETag "";
+    add_header Access-Control-Allow-Origin "www.example.com, cdn.example.com";
+    add_header Cache-Control "public";
+}
+
+# error pages
+error_page  404              /404.html;
+location = /404.html {
+    root   /usr/share/nginx/html;
+    #root   $MAGE_ROOT/errors/default;
+}
+error_page   500 502 503 504  /50x.html;
+location = /50x.html {
+    root   /usr/share/nginx/html;
+    #root   $MAGE_ROOT/errors/default;
+}
+
+## Forward paths like /js/index.php/x.js to relevant handler
+location ~ .php/ {
+    rewrite ^(.*.php)/ $1 last;
+}
+
+location /api {
+    rewrite ^/api/rest /api.php?type=rest;
+}
+
+rewrite ^/minify/([0-9]+)(/.*.(js|css))$ /lib/minify/m.php?f=$2&d=$1 last;
+rewrite ^/skin/m/([0-9]+)(/.*.(js|css))$ /lib/minify/m.php?f=$2&d=$1 last;
+
+
+# PHP entry point for main application
+#location ~ (index|get|url|static|report|404|503)\.php$ {
+location ~ \.php$ {
+    try_files $uri =404;
+    fastcgi_pass   fastcgi_backend;
+    fastcgi_buffers 1024 4k;
+
+    fastcgi_param  PHP_FLAG  "session.auto_start=off \n suhosin.session.cryptua=off";
+    fastcgi_param  PHP_VALUE "memory_limit=1208M \n max_execution_time=18000";
+    fastcgi_read_timeout 600s;
+    fastcgi_connect_timeout 600s;
+
+    fastcgi_index  index.php;
+    fastcgi_param  SCRIPT_FILENAME  $document_root$fastcgi_script_name;
+    include        fastcgi_params;
+    fastcgi_param  MAGE_MODE $MAGE_MODE;
+
+    fastcgi_param MAGE_RUN_TYPE $MAGE_RUN_TYPE;
+    fastcgi_param MAGE_RUN_CODE $MAGE_RUN_CODE;
+}
+
+
+# Just to make sure the compression is enabled
+gzip on;
+gzip_disable "msie6";
+
+gzip_comp_level 6;
+gzip_min_length 1100;
+gzip_buffers 16 8k;
+gzip_proxied any;
+gzip_types
+    text/plain
+    text/css
+    text/js
+    text/xml
+    text/javascript
+    application/javascript
+    application/x-javascript
+    application/json
+    application/xml
+    application/xml+rss
+    image/svg+xml;
+gzip_vary on;
